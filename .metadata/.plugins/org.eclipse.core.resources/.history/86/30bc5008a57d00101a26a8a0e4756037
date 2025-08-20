@@ -1,0 +1,157 @@
+package com.invoice.main.controller;
+
+
+
+import com.google.zxing.BarcodeFormat;
+import com.google.zxing.WriterException;
+import com.google.zxing.client.j2se.MatrixToImageWriter;
+import com.google.zxing.qrcode.QRCodeWriter;
+import com.itextpdf.text.*;
+import com.itextpdf.text.pdf.PdfPCell;
+import com.itextpdf.text.pdf.PdfPTable;
+import com.itextpdf.text.pdf.PdfWriter;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.UUID;
+
+@RestController
+@RequestMapping("/api/invoice")
+public class InvoiceController {
+
+    @GetMapping("/{dealerId}/{vehicleId}/{customerName}")
+    public ResponseEntity<byte[]> generateInvoice(
+            @PathVariable String dealerId,
+            @PathVariable String vehicleId,
+            @PathVariable String customerName) throws Exception {
+
+        // Mock data (replace with DB lookup in real case)
+        String dealerName = "ABC Motors Pvt Ltd";
+        String vehicleName = "Tesla Model Y";
+        double basePrice = 50000.00;
+        double tax = basePrice * 0.10;
+        double totalPrice = basePrice + tax;
+
+        String invoiceNumber = "INV-" + UUID.randomUUID().toString().substring(0, 8);
+        String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+        String transactionId = UUID.randomUUID().toString();
+
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        Document document = new Document();
+        PdfWriter.getInstance(document, baos);
+        document.open();
+
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        Document document = new Document(PageSize.A4, 50, 50, 50, 50);
+        PdfWriter writer = PdfWriter.getInstance(document, baos);
+        document.open();
+
+        // --- Add Watermark ---
+        PdfContentByte canvas = writer.getDirectContentUnder();
+        Font watermarkFont = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 60, BaseColor.LIGHT_GRAY);
+        Phrase watermark = new Phrase("ABC MOTORS", watermarkFont);
+        ColumnText.showTextAligned(canvas, Element.ALIGN_CENTER,
+                watermark, 300, 400, 45); // X, Y, Rotation
+
+        // --- Company Logo (Optional) ---
+        try {
+            Image logo = Image.getInstance("https://upload.wikimedia.org/wikipedia/commons/6/6e/Tesla_Motors_logo.png");
+            logo.scaleToFit(100, 50);
+            document.add(logo);
+        } catch (Exception e) {
+            document.add(new Paragraph("ABC Motors Pvt Ltd",
+                    FontFactory.getFont(FontFactory.HELVETICA_BOLD, 20, BaseColor.BLUE)));
+        }
+
+        // --- Title ---
+        Paragraph title = new Paragraph("Vehicle Sales Invoice",
+                FontFactory.getFont(FontFactory.HELVETICA_BOLD, 22, BaseColor.DARK_GRAY));
+        title.setAlignment(Element.ALIGN_CENTER);
+        document.add(title);
+        document.add(new Paragraph(" "));
+
+        // --- Invoice Info ---
+        PdfPTable invoiceTable = new PdfPTable(2);
+        invoiceTable.setWidthPercentage(100);
+        invoiceTable.setWidths(new float[]{70, 30});
+        invoiceTable.getDefaultCell().setBorder(Rectangle.NO_BORDER);
+        invoiceTable.addCell("");
+        invoiceTable.addCell("Invoice No: " + invoiceNumber + "\nDate: " + timestamp);
+        document.add(invoiceTable);
+        document.add(new Paragraph(" "));
+
+        // --- Customer & Dealer ---
+        PdfPTable custDealerTable = new PdfPTable(2);
+        custDealerTable.setWidthPercentage(100);
+        custDealerTable.addCell("Customer: " + customerName);
+        custDealerTable.addCell("Dealer: " + dealerName + " (ID: " + dealerId + ")");
+        document.add(custDealerTable);
+        document.add(new Paragraph(" "));
+
+        // --- Vehicle Details Table ---
+        PdfPTable table = new PdfPTable(2);
+        table.setWidthPercentage(100);
+        table.setSpacingBefore(10f);
+        table.setSpacingAfter(10f);
+
+        table.addCell("Vehicle");
+        table.addCell(vehicleName + " (ID: " + vehicleId + ")");
+        table.addCell("Base Price");
+        table.addCell("$" + basePrice);
+        table.addCell("Tax (10%)");
+        table.addCell("$" + tax);
+
+        PdfPCell totalCell1 = new PdfPCell(new Phrase("Total Price",
+                FontFactory.getFont(FontFactory.HELVETICA_BOLD, 12)));
+        PdfPCell totalCell2 = new PdfPCell(new Phrase("$" + totalPrice,
+                FontFactory.getFont(FontFactory.HELVETICA_BOLD, 12)));
+        totalCell1.setBackgroundColor(BaseColor.LIGHT_GRAY);
+        totalCell2.setBackgroundColor(BaseColor.LIGHT_GRAY);
+        table.addCell(totalCell1);
+        table.addCell(totalCell2);
+
+        document.add(table);
+
+        // --- QR Code Section ---
+        PdfPTable qrTable = new PdfPTable(2);
+        qrTable.setWidthPercentage(100);
+
+        qrTable.addCell("Transaction ID:\n" + transactionId + "\n\nScan for details →");
+
+        Image qrImage = getQRCodeImage(transactionId, 120, 120);
+        PdfPCell qrCell = new PdfPCell(qrImage, true);
+        qrCell.setHorizontalAlignment(Element.ALIGN_RIGHT);
+        qrCell.setBorder(Rectangle.NO_BORDER);
+        qrTable.addCell(qrCell);
+
+        document.add(qrTable);
+
+        // --- Footer ---
+        Paragraph footer = new Paragraph("Thank you for your purchase!\nFor support contact: support@abcmotors.com",
+                FontFactory.getFont(FontFactory.HELVETICA, 10, BaseColor.GRAY));
+        footer.setAlignment(Element.ALIGN_CENTER);
+        document.add(footer);
+
+        document.close();
+
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=" + invoiceNumber + ".pdf")
+                .contentType(MediaType.APPLICATION_PDF)
+                .body(baos.toByteArray());
+    }
+
+    private Image getQRCodeImage(String text, int width, int height) throws WriterException, IOException, BadElementException {
+        QRCodeWriter qrCodeWriter = new QRCodeWriter();
+        var bitMatrix = qrCodeWriter.encode(text, BarcodeFormat.QR_CODE, width, height);
+        ByteArrayOutputStream pngOutput = new ByteArrayOutputStream();
+        MatrixToImageWriter.writeToStream(bitMatrix, "PNG", pngOutput);
+        return Image.getInstance(pngOutput.toByteArray());
+    }
+}
+

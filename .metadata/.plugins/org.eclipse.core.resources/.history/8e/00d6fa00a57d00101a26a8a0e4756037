@@ -1,0 +1,87 @@
+package com.invoice.main.controller;
+
+
+
+import com.google.zxing.BarcodeFormat;
+import com.google.zxing.WriterException;
+import com.google.zxing.client.j2se.MatrixToImageWriter;
+import com.google.zxing.qrcode.QRCodeWriter;
+import com.itextpdf.text.*;
+import com.itextpdf.text.pdf.PdfWriter;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.UUID;
+
+@RestController
+@RequestMapping("/api/invoice")
+public class InvoiceController {
+
+    @GetMapping("/{dealerId}/{vehicleId}/{customerName}")
+    public ResponseEntity<byte[]> generateInvoice(
+            @PathVariable String dealerId,
+            @PathVariable String vehicleId,
+            @PathVariable String customerName) throws Exception {
+
+        // Mock data (replace with DB lookup in real case)
+        String dealerName = "ABC Motors Pvt Ltd";
+        String vehicleName = "Tesla Model Y";
+        double basePrice = 50000.00;
+        double tax = basePrice * 0.10;
+        double totalPrice = basePrice + tax;
+
+        String invoiceNumber = "INV-" + UUID.randomUUID().toString().substring(0, 8);
+        String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+        String transactionId = UUID.randomUUID().toString();
+
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        Document document = new Document();
+        PdfWriter.getInstance(document, baos);
+        document.open();
+
+        // Header
+        document.add(new Paragraph("Vehicle Sales Invoice", FontFactory.getFont(FontFactory.HELVETICA_BOLD, 18)));
+        document.add(new Paragraph("Invoice Number: " + invoiceNumber));
+        document.add(new Paragraph("Date: " + timestamp));
+        document.add(new Paragraph(" "));
+
+        // Customer + Dealer
+        document.add(new Paragraph("Customer: " + customerName));
+        document.add(new Paragraph("Dealer: " + dealerName + " (ID: " + dealerId + ")"));
+        document.add(new Paragraph(" "));
+
+        // Vehicle
+        document.add(new Paragraph("Vehicle: " + vehicleName + " (ID: " + vehicleId + ")"));
+        document.add(new Paragraph("Base Price: $" + basePrice));
+        document.add(new Paragraph("Tax (10%): $" + tax));
+        document.add(new Paragraph("Total Price: $" + totalPrice));
+        document.add(new Paragraph(" "));
+
+        // QR Code (Bonus)
+        Image qrImage = getQRCodeImage(transactionId, 100, 100);
+        document.add(new Paragraph("Transaction ID: " + transactionId));
+        document.add(qrImage);
+
+        document.close();
+
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=" + invoiceNumber + ".pdf")
+                .contentType(MediaType.APPLICATION_PDF)
+                .body(baos.toByteArray());
+    }
+
+    private Image getQRCodeImage(String text, int width, int height) throws WriterException, IOException, BadElementException {
+        QRCodeWriter qrCodeWriter = new QRCodeWriter();
+        var bitMatrix = qrCodeWriter.encode(text, BarcodeFormat.QR_CODE, width, height);
+        ByteArrayOutputStream pngOutput = new ByteArrayOutputStream();
+        MatrixToImageWriter.writeToStream(bitMatrix, "PNG", pngOutput);
+        return Image.getInstance(pngOutput.toByteArray());
+    }
+}
+
